@@ -32,8 +32,8 @@ def conversation_id(engagement_id):
 
 # /respond: audio filename -> LLM answer. Does NOT catch errors; the caller
 # (_process_and_respond) handles failures and speaks the fallback line.
-def get_llm_response(filename, engagement_id=None):
-    payload = {"audio_filename": filename, "conversation_id": conversation_id(engagement_id)}
+def get_llm_response(filename, engagement_id=None, name=None):
+    payload = {"audio_filename": filename, "conversation_id": conversation_id(engagement_id), "name": name or ""}
     result = _post_json("/respond", payload, TIMEOUT_LLM)
     return result["answer"].encode('utf-8')
 

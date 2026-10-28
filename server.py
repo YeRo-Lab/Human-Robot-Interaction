@@ -101,13 +101,24 @@ def generate(prompt, system_instruction=None, history=None):
         last_error = error
         next_launch = time.time()  # a failure starts the next model right away
 
-def chat(conversation_id, user_text):
+def person_note(person_name):
+    """One line telling the LLM who it is talking to (sent with every request, never stored in the history)."""
+    if person_name:
+        return ("\n\nThe person you are talking to is named " + person_name + ". You recognized them. "
+                "Use their name only now and then, naturally. If they ask who they are or what their name is, tell them.")
+    return ("\n\nYou are still working out who this person is: your camera is trying to recognize them right now. "
+        "If they ask who they are or whether you know them, say you are still trying to work out who they are. "
+        "Do not say you have never met, and do not guess a name. "
+        "At the end of your current statement you will be confirming their identity, so do not ask about it yourself.")
+
+def chat(conversation_id, user_text, person_name=None):
     """Yuno's reply to user_text, remembering this visit's earlier turns. No id means no memory."""
+    system = SYSTEM_PROMPT + person_note(person_name)
     if conversation_id is None:
-        return generate(user_text, SYSTEM_PROMPT)
+        return generate(user_text, system)
     with history_lock:
         history = list(histories.get(conversation_id, []))
-    answer = generate(user_text, SYSTEM_PROMPT, history)
+    answer = generate(user_text, system, history)
     with history_lock:
         turns = histories.setdefault(conversation_id, [])
         turns.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
@@ -130,6 +141,8 @@ list(whisper_model.transcribe(np.zeros(16000, dtype=np.float32))[0])  # warm-up 
 print("Whisper ready:", WHISPER_MODEL, WHISPER_DEVICE, WHISPER_COMPUTE)
 
 FACE_DB_PATH = "face_database"
+RECOGNITION_MODEL = "VGG-Face"
+RECOGNITION_DETECTOR = "yunet"
 
 def transcribe_audio(filepath):
     t0 = time.time()
@@ -156,7 +169,7 @@ def respond():
         print("Empty transcript, asking the person to repeat.")
         return jsonify({"answer": "Sorry, I didn't quite catch that. Could you say that again?", "heard": ""})
 
-    answer = chat(data.get("conversation_id"), transcribed_text)
+    answer = chat(data.get("conversation_id"), transcribed_text, data.get("name") or None)
 
     return jsonify({"answer": answer, "heard": transcribed_text})
 
@@ -259,7 +272,8 @@ def save_new_person(image_paths, name, db_path="face_database"):
 
 def find_person(image_path, db_path=FACE_DB_PATH):
     try:
-        results = DeepFace.find(img_path=image_path, db_path=db_path, enforce_detection=False)
+        results = DeepFace.find(img_path=image_path, db_path=db_path, model_name=RECOGNITION_MODEL,
+                        detector_backend=RECOGNITION_DETECTOR, enforce_detection=False, silent=True)
         if len(results) > 0 and len(results[0]) > 0:
             top = results[0].iloc[0]
             matched_path = top["identity"]
@@ -333,6 +347,19 @@ def confirm_yes_no_route():
     print("LLM yes/no call took %.2fs" % (time.time() - t1))
 
     return jsonify({"confirmed": result})
+
+def warm_up_recognition():
+    """Builds the face index for the current model/detector now, not on the first visitor."""
+    try:
+        import glob
+        sample = glob.glob(os.path.join(FACE_DB_PATH, "*", "*.jpg"))[0]
+        DeepFace.find(img_path=sample, db_path=FACE_DB_PATH, model_name=RECOGNITION_MODEL,
+                      detector_backend=RECOGNITION_DETECTOR, enforce_detection=False, silent=True)
+        print("Recognition ready:", RECOGNITION_MODEL, RECOGNITION_DETECTOR)
+    except Exception as e:
+        print("Recognition warm-up failed:", e)
+
+warm_up_recognition()
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000)

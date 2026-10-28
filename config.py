@@ -52,3 +52,9 @@ AUDIO_SAMPLE_RATE = 48000
 AUDIO_CHANNELS = 4
 AUDIO_BYTES_PER_SAMPLE = 2   # 16-bit
 AUDIO_FRONT_CHANNEL = 2      # index of the front mic channel used for RMS/VAD
+
+# --- filler line settings ---
+FILLER_LINES = ["Hmm, let me think.", "Let me think.", "Hmm, let me see.", "One sec.", "Let me see.", "Hmm."]
+FILLER_AFTER_SECONDS = 1.5     # say a filler only if the answer isn't back by then
+FILLER_REPEAT_SECONDS = 10.0     # still waiting: next filler after this long
+MAX_FILLERS_PER_REPLY = 2

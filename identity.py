@@ -9,10 +9,11 @@ import server_client
 
 def _drop_trailing_questions(text):
     """Removes question sentences from the end of text, e.g. "Nice! Want to chat? Anything fun?" -> "Nice!"."""
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    protected = re.sub(r'\b(Dr|Mr|Mrs|Ms|Prof|St)\.', r'\1<dot>', text.strip())  # "Dr." must not end a sentence
+    sentences = re.split(r'(?<=[.!?])\s+', protected)
     while sentences and sentences[-1].endswith("?"):
         sentences.pop()
-    return " ".join(sentences)
+    return " ".join(sentences).replace("<dot>", ".")
 
 class IdentityMixin(object):
 
@@ -125,6 +126,11 @@ class IdentityMixin(object):
             self.pending_photo_paths = photo_paths
             self.candidate_face_id = candidate
 
+    # The confirmed name of the person, or None while they are still a guest / unconfirmed.
+    def _known_name(self):
+        name = self.pending_face_id
+        return name if name and name != config.GUEST_NAME else None
+
     # Speaks the LLM reply. If background recognition found someone who isn't confirmed yet, it also asks
     # "are you <name>?" afterwards. The reply's own trailing question is dropped first, so the person never
     # has two questions to answer and a "yes"/"no" can't be taken for the wrong one.
@@ -138,7 +144,7 @@ class IdentityMixin(object):
             self.animated_speech.say(answer, self.speech_config)
         if ask and not self._is_stale(engagement_id):
             self.awaiting_confirmation = "identity"
-            lead = "By the way, are you " if answer else "Before we go on, are you "
+            lead = "Just to make sure, are you " if answer else "Before we go on, are you "
             self.animated_speech.say(lead + name + "?", self.speech_config)
 
 
@@ -225,7 +231,7 @@ class IdentityMixin(object):
             if self._is_stale(engagement_id):
                 self._log("Human left before opener was ready, staying silent.")
                 self.candidate_face_id = None
-                return  # NEW
+                return
 
             self.animated_speech.say(opener, self.speech_config)
             self.candidate_face_id = None

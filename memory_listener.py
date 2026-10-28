@@ -2,6 +2,7 @@ from __future__ import print_function
 from naoqi import ALProxy, ALBroker, ALModule
 import time
 import threading
+import random
 
 import server_client
 from leds import LedsMixin
@@ -256,7 +257,7 @@ class MemoryListenerModule(LedsMixin, CameraMixin, AudioMixin, IdentityMixin, AL
         self._start_processing_leds()
         t0 = time.time()
         try:
-            answer = server_client.get_llm_response(filename, engagement_id)
+            answer = self._get_answer_with_fillers(filename, engagement_id)
         except Exception as e:
             self._stop_processing_leds()
             self._log("LLM/STT call failed:", e)
@@ -275,6 +276,45 @@ class MemoryListenerModule(LedsMixin, CameraMixin, AudioMixin, IdentityMixin, AL
         self.leds.fadeRGB("FaceLeds", 0.0, 1.0, 0.0, 0.3)
         self._speak_reply(answer, engagement_id)
         self._continue_or_idle(engagement_id)
+
+    # Asks the server for the reply on a worker thread. If it isn't back after FILLER_AFTER_SECONDS, says a short
+    # varied filler line (never the same one twice in a row), at most MAX_FILLERS_PER_REPLY per reply.
+    def _get_answer_with_fillers(self, filename, engagement_id):
+        name = self._known_name()
+        box = {}
+
+        def work():
+            try:
+                box["answer"] = server_client.get_llm_response(filename, engagement_id, name)
+            except Exception as e:
+                box["error"] = e
+
+        worker = threading.Thread(target=work)
+        worker.daemon = True
+        worker.start()
+
+        unused = list(config.FILLER_LINES)
+        random.shuffle(unused)
+        last = getattr(self, "_last_filler", None)
+        if len(unused) > 1 and unused[-1] == last:
+            unused[0], unused[-1] = unused[-1], unused[0]
+        fillers_said = 0
+        wait = config.FILLER_AFTER_SECONDS
+        while True:
+            worker.join(wait)
+            if not worker.is_alive():
+                break
+            if self._is_stale(engagement_id) or fillers_said >= config.MAX_FILLERS_PER_REPLY or not unused:
+                worker.join()  # nothing more to say, just wait for the reply
+                break
+            line = unused.pop()
+            self.animated_speech.say(line, self.speech_config_still)
+            self._last_filler = line
+            fillers_said += 1
+            wait = config.FILLER_REPEAT_SECONDS
+        if "error" in box:
+            raise box["error"]
+        return box["answer"]
 
     # Keeps listening (blue eyes + _start_listening) if the same person is still engaged, else idles (white eyes).
     def _continue_or_idle(self, engagement_id):  # NEW: added engagement_id param (was def _continue_or_idle(self):)

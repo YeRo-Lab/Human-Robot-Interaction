@@ -222,3 +222,6 @@ __marimo__/
 face_database/
 captures/
 audio/
+test_captures/
+results/
+compare_db/
